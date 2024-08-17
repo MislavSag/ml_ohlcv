@@ -51,7 +51,11 @@ snakeToCamel <- function(snake_str) {
 
 # PREPARE DATA ------------------------------------------------------------
 # Read predictors
-dt = fread("F:/strategies/mlohlcv/ml-ohlcv-20240731.csv")
+if (interactive()) {
+  dt = fread("F:/strategies/mlohlcv/ml-ohlcv-20240731.csv")
+} else {
+  dt = fread("ml-ohlcv-20240731.csv")
+}
 
 # define predictors
 target_columns = c("target_ret_1")
@@ -948,12 +952,33 @@ cf = makeClusterFunctionsSocket(ncpus = 4L)
 reg$cluster.functions = cf
 saveRegistry(reg = reg)
 
-# test one job
-test = batchtools::testJob(1)
-test$prediction$test$response
+# Train if local else save as file
+if (interactive()) {
+  # test one job
+  test = batchtools::testJob(1)
+  test$prediction$test$response
 
-# define resources and submit jobs
-resources = list(ncpus = 2, memory = 8000)
-submitJobs(ids = ids$job.id,
-           resources = resources,
-           reg = reg)
+  # define resources and submit jobs
+  resources = list(ncpus = 2, memory = 8000)
+  submitJobs(ids = ids$job.id,
+             resources = resources,
+             reg = reg)
+} else {
+  # create sh file
+  sh_file = sprintf("
+#!/bin/bash
+
+#PBS -N PEAD
+#PBS -l ncpus=4
+#PBS -l mem=8GB
+#PBS -J 1-%d
+#PBS -o %s/logs
+#PBS -j oe
+
+cd ${PBS_O_WORKDIR}
+apptainer run image.sif run_job.R 0
+", nrow(designs), dirname_)
+  sh_file_name = "run_month.sh"
+  file.create(sh_file_name)
+  writeLines(sh_file, sh_file_name)
+}

@@ -155,3 +155,7 @@ last_date = strftime(dt[, max(date)], "%Y%m%d")
 file_name = paste0("ml-ohlcv-", last_date, ".csv")
 file_name_local = fs::path(PATH, file_name)
 fwrite(dt, file_name_local)
+
+# Send data to padobran mannually
+
+
