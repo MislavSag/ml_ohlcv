@@ -65,7 +65,7 @@ system.time({
 # user  system elapsed
 # 47.93  935.37   49.25
 system.time({
-  arr = tiledb_array("F:/data/equity/us/predictors_daily/exuber",
+  arr = tiledb_array("F:/data/equity/us/predictors_daily/backcusum",
                      return_as = "data.table",
                      query_layout = "UNORDERED")
   selected_ranges(arr) = list(symbol = cbind(symbols, symbols))

@@ -732,9 +732,14 @@ designs_parallel_l = lapply(seq_along(custom_cvs), function(j) {
   cv_outer = cv_$outer
   cat("Number of iterations fo cv inner is ", cv_inner$iters, "\n")
 
-  # to_ = 1:cv_inner$iters
-  to_ = 1:5
-  designs_cv_l = lapply(to_, function(i) { # 1:cv_inner$iters
+  # Define index
+  if (interactive()) {
+    indecies_ = 1:5
+  } else {
+    indecies_ = 1:cv_inner$iters
+  }
+
+  designs_cv_l = lapply(indecies_, function(i) {
     # debug
     # i = 1
 
@@ -939,7 +944,7 @@ reg = makeExperimentRegistry(file.dir = dirname_,
                              packages = packages)
 
 # Populate registry with problems and algorithms to form the jobs
-batchmark(designs[1:33], store_models = TRUE, reg = reg)
+batchmark(designs, store_models = TRUE, reg = reg)
 
 # Save registry
 saveRegistry(reg = reg)
