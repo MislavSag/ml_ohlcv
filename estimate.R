@@ -976,7 +976,7 @@ if (interactive()) {
 #PBS -j oe
 
 cd ${PBS_O_WORKDIR}
-apptainer run image.sif run_job.R 0 %s
+apptainer run image.sif padobran_run.R 0 %s
 ", nrow(designs), dirname_, dirname_)
   sh_file_name = "run_month.sh"
   file.create(sh_file_name)
