@@ -255,13 +255,6 @@ graph_rf = graph_template %>>%
   po("learner", learner = lrn("regr.ranger"))
 graph_rf = as_learner(graph_rf)
 as.data.table(graph_rf$param_set)[, .(id, class, lower, upper, levels)]
-new_ps = ps(
-  regr.ranger.max.depth  = p_int(1, 15),
-  regr.ranger.replace    = p_lgl(),
-  regr.ranger.mtry.ratio = p_dbl(0.3, 1),
-  regr.ranger.num.trees  = p_int(10, 2000),
-  regr.ranger.splitrule  = p_fct(levels = c("variance", "extratrees"))
-)
 search_space_rf = c(
   search_space_template,
   ps(
@@ -361,7 +354,7 @@ as.data.table(graph_kknn$param_set)[, .(id, class, lower, upper, levels)]
 search_space_kknn = c(
   search_space_template,
   ps(
-    regr.kknn.k        = p_int(lower = 1, upper = 50, logscale = TRUE),
+    regr.kknn.k        = p_dbl(lower = 1, upper = 50, logscale = TRUE),
     regr.kknn.distance = p_dbl(lower = 1, upper = 5),
     regr.kknn.kernel   = p_fct(levels = c("rectangular","optimal", "epanechnikov",
                                           "biweight", "triweight", "cos", "inv",
@@ -946,7 +939,7 @@ reg = makeExperimentRegistry(file.dir = dirname_,
                              packages = packages)
 
 # Populate registry with problems and algorithms to form the jobs
-batchmark(designs, store_models = TRUE, reg = reg)
+batchmark(designs, store_models = FALSE, reg = reg)
 
 # Save registry
 saveRegistry(reg = reg)
@@ -983,8 +976,8 @@ if (interactive()) {
 #PBS -j oe
 
 cd ${PBS_O_WORKDIR}
-apptainer run image.sif run_job.R 0
-", nrow(designs), dirname_)
+apptainer run image.sif run_job.R 0 %s
+", nrow(designs), dirname_, dirname_)
   sh_file_name = "run_month.sh"
   file.create(sh_file_name)
   writeLines(sh_file, sh_file_name)
