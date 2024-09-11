@@ -122,3 +122,6 @@ dt[, max(date)]
 
 # Save
 fwrite(dt, "/home/sn/data/strategies/ml_ohlcv/data.csv")
+
+# Save to padobran
+# scp /home/sn/data/strategies/ml_ohlcv/data.csv padobran:/home/jmaric/ml_ohlcv/data.csv

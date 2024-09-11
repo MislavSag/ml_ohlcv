@@ -455,7 +455,7 @@ tasks = lapply(dt[, unique(symbol)], function(symbol_) {
     dt[symbol == symbol_, .SD, .SDcols = c(cols_ids, cols_predictors)],
     id = symbol_,
     target = cols_target)
-  task_$col_roles$feature = setdiff(task_$col_roles$feature, id_cols)
+  task_$col_roles$feature = setdiff(task_$col_roles$feature, cols_ids)
   return(task_)
 })
 
