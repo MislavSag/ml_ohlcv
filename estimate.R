@@ -8,94 +8,27 @@ library(mlr3batchmark)
 
 
 # SETUP -------------------------------------------------------------------
-# monnb <- function(d) {
-#   lt <- as.POSIXlt(as.Date(d, origin="1900-01-01"))
-#   lt$year*12 + lt$mon }
-# mondf <- function(d1, d2) { monnb(d2) - monnb(d1) }
-# diff_in_weeks = function(d1, d2) difftime(d2, d1, units = "weeks") # weeks
-
-# snake to camel
-snakeToCamel <- function(snake_str) {
-  # Replace underscores with spaces
-  spaced_str <- gsub("_", " ", snake_str)
-
-  # Convert to title case using tools::toTitleCase
-  title_case_str <- tools::toTitleCase(spaced_str)
-
-  # Remove spaces and make the first character lowercase
-  camel_case_str <- gsub(" ", "", title_case_str)
-  camel_case_str <- sub("^.", tolower(substr(camel_case_str, 1, 1)), camel_case_str)
-
-  # I haeve added this to remove dot
-  camel_case_str <- gsub("\\.", "", camel_case_str)
-
-  return(camel_case_str)
-}
-
-# Azure creditentials
-# endpoint = "https://snpmarketdata.blob.core.windows.net/"
-# key = Sys.getenv("BLOBKEY")
-# BLOBENDPOINT = storage_endpoint(endpoint, key=key)
-# cont = storage_container(BLOBENDPOINT, "qc-live")
-
-# Check if today is sutarday
-# MODEL = FALSE
-# if (weekdays(Sys.Date()) == "sabato") {
-#   print("Today is Saturday, modeling time.")
-#   MODEL = TRUE
-# }
-
-# # Paths
-# SAVEPATH = "/home/sn/data/models/pread/predictions"
+# Parameters
+ncpus = 4
 
 
-# PREPARE DATA ------------------------------------------------------------
-# Read predictors
+# DATA --------------------------------------------------------------------
+# Read data
 if (interactive()) {
-  dt = fread("F:/strategies/mlohlcv/ml-ohlcv-20240731.csv")
+  dt = fread("/home/sn/data/strategies/ml_ohlcv/data.csv")
 } else {
-  dt = fread("ml-ohlcv-20240731.csv")
+  dt = fread("data.csv")
 }
 
-# define predictors
-target_columns = c("target_ret_1")
-cols_non_features = c(
-  "symbol", "date", "liquid_500", "liquid_200", "liquid_100", "open", "high",
-  "low", "close", "volume", "close_raw", "returns", target_columns)
-cols_features = setdiff(colnames(dt), cols_non_features)
-cols = c(cols_non_features, cols_features)
+# Define predictors, targets and ids
+cols_target = colnames(dt)[grep("target", colnames(dt))]
+cols_ids = c("symbol", "date", cols_target)
+cols_remove = c("open", "high", "low", "close", "volume", "close_raw","returns")
+cols_predictors = setdiff(colnames(dt), c(cols_ids, cols_remove))
 
-# change feature and targets columns names due to lighgbm
-cols_features_new = vapply(cols_features, snakeToCamel, FUN.VALUE = character(1L), USE.NAMES = FALSE)
-setnames(dt, cols_features, cols_features_new)
-cols_features = cols_features_new
-
-# Remove constant columns in set
-features_ = dt[, ..cols_features]
-remove_cols = colnames(features_)[apply(features_, 2, var, na.rm=TRUE) == 0]
-print(paste0("Removing feature with 0 standard deviation: ", remove_cols))
-cols_features = setdiff(cols_features, remove_cols)
-
-# Convert variables with low number of unique values to factors
-int_numbers = na.omit(dt[, ..cols_features])[, lapply(.SD, function(x) all(floor(x) == x))]
-int_cols = colnames(dt[, ..cols_features])[as.matrix(int_numbers)[1,]]
-factor_cols = dt[, ..int_cols][, lapply(.SD, function(x) length(unique(x)))]
-factor_cols = as.matrix(factor_cols)[1, ]
-factor_cols = factor_cols[factor_cols <= 100]
-dt = dt[, (names(factor_cols)) := lapply(.SD, as.factor), .SD = names(factor_cols)]
-
-# change IDate to date, because of error
-# Assertion on 'feature types' failed: Must be a subset of
-# {'logical','integer','numeric','character','factor','ordered','POSIXct'},
-# but has additional elements {'IDate'}.
-dt[, date := as.POSIXct(date, tz = "UTC")]
-
-# Sort
-# this returns error on HPC. Some problem with memory
-# setorder(DT, date)
-print("This was the problem")
-dt = dt[order(symbol, date)]
-print("This was the problem. Solved.")
+# int64 to integer
+cols = dt[ , colnames(.SD), .SDcols = bit64::is.integer64]
+dt[ , (cols) := lapply(.SD, as.numeric), .SDcols = cols]
 
 
 # ADD PIPELINES -----------------------------------------------------------
@@ -498,39 +431,30 @@ search_space_bart = c(
 # iter = p_int(lower = 100, upper = 1000)
 
 # Threads
-# if (interactive()) {
-#   threads = 4
-# } else {
-#   threads = 4
-# }
-threads = 4
-set_threads(graph_rf, n = threads)
-set_threads(graph_xgboost, n = threads)
-set_threads(graph_bart, n = threads)
+set_threads(graph_rf, n = ncpus)
+set_threads(graph_xgboost, n = ncpus)
+set_threads(graph_bart, n = ncpus)
 # set_threads(graph_ksvm, n = threads) # unstable
-set_threads(graph_nnet, n = threads)
-set_threads(graph_kknn, n = threads)
-set_threads(graph_lightgbm, n = threads)
-set_threads(graph_earth, n = threads)
-set_threads(graph_gbm, n = threads)
-set_threads(graph_rsm, n = threads)
-set_threads(graph_catboost, n = threads)
-set_threads(graph_glmnet, n = threads)
+set_threads(graph_nnet, n = ncpus)
+set_threads(graph_kknn, n = ncpus)
+set_threads(graph_lightgbm, n = ncpus)
+set_threads(graph_earth, n = ncpus)
+set_threads(graph_gbm, n = ncpus)
+set_threads(graph_rsm, n = ncpus)
+set_threads(graph_catboost, n = ncpus)
+set_threads(graph_glmnet, n = ncpus)
 # set_threads(graph_cforest, n = threads)
 
 
-
 # PARALLEL TASKS ----------------------------------------------------------
-# ID columns we always keep
-id_cols = c("symbol", "date", "target_ret_1")
-cols_ = c(id_cols, cols_features)
-
 # Create tasks for every symbol
+str(dt)
 tasks = lapply(dt[, unique(symbol)], function(symbol_) {
   print(symbol_)
-  task_ = as_task_regr(dt[symbol == symbol_, ..cols_],
-                       id = symbol_,
-                       target = "target_ret_1")
+  task_ = as_task_regr(
+    dt[symbol == symbol_, .SD, .SDcols = c(cols_ids, cols_predictors)],
+    id = symbol_,
+    target = cols_target)
   task_$col_roles$feature = setdiff(task_$col_roles$feature, id_cols)
   return(task_)
 })
@@ -692,6 +616,7 @@ if (interactive()) {
   plots = lapply(custom_cvs, plot_cv, n = 30)
   wp = wrap_plots(plots)
   ggsave("plot_cv.png", plot = wp, width = 10, height = 8, dpi = 300)
+  print(wp)
 }
 
 
@@ -713,8 +638,7 @@ if (interactive()) {
 
 
 # DESIGNS -----------------------------------------------------------------
-print("Designs")
-
+# Create design that will be used for all learners
 designs_parallel_l = lapply(seq_along(custom_cvs), function(j) {
   # debug
   # j = 1
@@ -729,7 +653,7 @@ designs_parallel_l = lapply(seq_along(custom_cvs), function(j) {
 
   # Define index
   if (interactive()) {
-    indecies_ = 1:5
+    indecies_ = 1:2
   } else {
     indecies_ = 1:cv_inner$iters
   }
@@ -916,23 +840,18 @@ designs_parallel_l = lapply(seq_along(custom_cvs), function(j) {
 designs = do.call(rbind, designs_parallel_l)
 
 # Exp dir
-date_ = strftime(Sys.time(), format = "%Y%m%d")
-dirname_ = paste0("experiments_mlohlcv_", date_)
-if (dir.exists(dirname_)) system(paste0("rm -r ", dirname_))
+if (interactive()) {
+  dirname_ = "experiments_test"
+  if (dir.exists(dirname_)) system(paste0("rm -r ", dirname_))
+} else {
+  dirname_ = "experiments_test"
+  if (dir.exists(dirname_)) system(paste0("rm -r ", dirname_))
+}
 
 # Create registry
 packages = c(
-  "data.table",
-  "gausscov",
-  "paradox",
-  "mlr3",
-  "mlr3pipelines",
-  "mlr3tuning",
-  "mlr3misc",
-  "future",
-  "future.apply",
-  "mlr3extralearners",
-  "stats"
+  "data.table", "gausscov", "paradox", "mlr3", "mlr3pipelines", "mlr3tuning",
+  "mlr3misc", "future", "future.apply", "mlr3extralearners", "stats"
 )
 reg = makeExperimentRegistry(file.dir = dirname_,
                              seed = 1,
@@ -944,40 +863,40 @@ batchmark(designs, store_models = FALSE, reg = reg)
 # Save registry
 saveRegistry(reg = reg)
 
-# get nondone jobs
-ids = findNotDone(reg = reg)
-
-# set up cluster (for local it is parallel)
-cf = makeClusterFunctionsSocket(ncpus = 4L)
-reg$cluster.functions = cf
-saveRegistry(reg = reg)
-
 # Train if local else save as file
 if (interactive()) {
+  # get nondone jobs
+  ids = findNotDone(reg = reg)
+
+  # set up cluster (for local it is parallel)
+  cf = makeClusterFunctionsSocket(ncpus = ncpus)
+  reg$cluster.functions = cf
+  saveRegistry(reg = reg)
+
   # test one job
-  test = batchtools::testJob(1)
+  test = batchtools::testJob(1, reg = reg)
   test$prediction$test$response
 
-  # define resources and submit jobs
-  resources = list(ncpus = 2, memory = 8000)
-  submitJobs(ids = ids$job.id,
-             resources = resources,
-             reg = reg)
+  # # define resources and submit jobs
+  # resources = list(ncpus = 2, memory = 8000)
+  # submitJobs(ids = ids$job.id,
+  #            resources = resources,
+  #            reg = reg)
 } else {
   # create sh file
   sh_file = sprintf("
 #!/bin/bash
 
 #PBS -N MLOHLCV
-#PBS -l ncpus=4
-#PBS -l mem=8GB
+#PBS -l ncpus=%d
+#PBS -l mem=4GB
 #PBS -J 1-%d
 #PBS -o %s/logs
 #PBS -j oe
 
 cd ${PBS_O_WORKDIR}
 apptainer run image.sif padobran_run.R 0 %s
-", nrow(designs), dirname_, dirname_)
+", ncpus, nrow(designs), dirname_, dirname_)
   sh_file_name = "padobran_run.sh"
   file.create(sh_file_name)
   writeLines(sh_file, sh_file_name)

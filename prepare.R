@@ -1,83 +1,35 @@
 library(data.table)
 library(arrow)
-library(dplyr)
-library(finfeatures)
 
 
-# SET UP ------------------------------------------------------------------
-# Parameters
-symbols = c("tlt", "spy")
 
-# Globals
-PATH = "F:/strategies/mlohlcv"
-# get_ohlcv_by_symbols = function(path, symbols) {
-#   con = dbConnect(duckdb::duckdb())
-#   symbols_string = paste(sprintf("'%s'", symbols), collapse=", ")
-#   query = sprintf("
-#   SELECT *
-#   FROM '%s'
-#   WHERE Symbol IN (%s)
-# ", path, symbols_string)
-#   prices_dt = dbGetQuery(con, query)
-#   dbDisconnect(con, shutdown = TRUE)
-#   setDT(prices_dt)
-#   return(prices_dt)
-# }
-get_ohlcv_by_symbols = function(tag, symbols) {
-  path_ = paste0("F:/data/equity/us/predictors_daily/", tag)
-  ds = open_dataset(path_, format = "parquet") %>%
-    filter(symbol %in% symbols) %>%
-    mutate(symbol = as.character(symbol)) %>%
-    collect()
-  setDT(ds)
-  setorder(ds, symbol, date)
-  setcolorder(ds, "symbol", before = 1)
-  return(ds)
+# UTILS -------------------------------------------------------------------
+# Snake to camel for lighgbm
+snakeToCamel <- function(snake_str) {
+  # Replace underscores with spaces
+  spaced_str <- gsub("_", " ", snake_str)
+
+  # Convert to title case using tools::toTitleCase
+  title_case_str <- tools::toTitleCase(spaced_str)
+
+  # Remove spaces and make the first character lowercase
+  camel_case_str <- gsub(" ", "", title_case_str)
+  camel_case_str <- sub("^.", tolower(substr(camel_case_str, 1, 1)), camel_case_str)
+
+  # I haeve added this to remove dot
+  camel_case_str <- gsub("\\.", "", camel_case_str)
+
+  return(camel_case_str)
 }
 
 
-# DATA --------------------------------------------------------------------
-# OHLCV Prices
-prices = get_ohlcv_by_symbols("F:/strategies/momentum/prices.csv", symbols)
+# IMPORT DATA -------------------------------------------------------------
+# Import raw local data
+f = "/home/sn/data/equity/us/predictors_daily/ohlcv_predictors_sample_by_symbols.parquet"
+dt = read_parquet(f)
 
-
-# f = list.files("F:/data/equity/us/predictors_daily/fracdiff")
-# ft = grepl("symbol=[a-z]", f)
-# fn = nchar(f)
-# all(fn > 7)
-# nchar
-# nchar("symbol=")
-# all(ft)
-
-# Predictors
-# https://github.com/duckdb/duckdb/issues/4295
-system.time({backcusum = get_ohlcv_by_symbols("backcusum", symbols)})
-system.time({exuber = get_ohlcv_by_symbols("exuber", symbols)})
-system.time({forecasts = get_ohlcv_by_symbols("forecasts", symbols)})
-system.time({fracdiff = get_ohlcv_by_symbols("fracdiff", symbols)})
-system.time({theftpy = get_ohlcv_by_symbols("theftpy", symbols)})
-system.time({theftr = get_ohlcv_by_symbols("theftr", symbols)})
-system.time({tsfeatures = get_ohlcv_by_symbols("tsfeatures", symbols)})
-
-# Generate other Ohlcv predictors
-ohlcv = Ohlcv$new(prices)
-ohlcv_features_daily = OhlcvFeaturesDaily$new(
-  at = NULL,
-  windows = c(5, 10, 22, 44, 66, 132, 252, 504, 756),
-  quantile_divergence_window = c(22, 44, 66, 132, 252, 504, 756)
-)
-ohlcv_predictors = ohlcv_features_daily$get_ohlcv_features(ohlcv$X)
-
-# Merge prices and all predictors
-dt = Reduce(
-  function(x, y) merge(x, y, by = c("symbol", "date"), all = TRUE),
-  list(ohlcv_predictors, exuber, backcusum, forecasts, fracdiff)
-)
-
-# Inspect
-dim(dt)
-head(colnames(dt), 20)
-tail(colnames(dt), 20)
+# TODO: Remove some new data we dont have predictors for
+dt = dt[date < as.Date("2024-07-01")]
 
 
 # LABELING ----------------------------------------------------------------
@@ -92,10 +44,19 @@ dt = na.omit(dt, cols = target_columns)
 # FEATURES SPACE ----------------------------------------------------------
 # Features space from features raw
 cols_non_features = c(
-  "symbol", "date", "liquid_500", "liquid_200", "liquid_100", "open", "high",
-  "low", "close", "volume", "close_raw", "returns", target_columns)
+  "symbol", "date", "open", "high", "low", "close", "volume", "close_raw",
+  "returns", target_columns)
+cols_non_features %in% colnames(dt)
 cols_features = setdiff(colnames(dt), cols_non_features)
 cols = c(cols_non_features, cols_features)
+
+# change feature and targets columns names due to lighgbm
+cols_features_new = vapply(cols_features, snakeToCamel, FUN.VALUE = character(1L), USE.NAMES = FALSE)
+setnames(dt, cols_features, cols_features_new)
+cols_features = cols_features_new
+cols_targets_new = vapply(target_columns, snakeToCamel, FUN.VALUE = character(1L), USE.NAMES = FALSE)
+setnames(dt, target_columns, cols_targets_new)
+target_columns = target_columns
 
 
 # CLEAN DATA --------------------------------------------------------------
@@ -131,15 +92,33 @@ dt = dt[is.finite(rowSums(dt[, .SD, .SDcols = is.numeric], na.rm = TRUE))]
 n_1 = nrow(dt)
 print(paste0("Removing ", n_0 - n_1, " rows because of Inf values"))
 
+# Remove constant columns in set
+features_ = dt[, .SD, .SDcols = intersect(cols_features, colnames(dt))]
+remove_cols = colnames(features_)[apply(features_, 2, var, na.rm=TRUE) == 0]
+print(paste0("Removing constant: ", remove_cols))
+dt = dt[, .SD, .SDcols = setdiff(colnames(dt), remove_cols)]
+
+# Convert variables with low number of unique values to factors
+cols_features = setdiff(colnames(dt), cols_non_features)
+int_numbers = na.omit(dt[, ..cols_features])[, lapply(.SD, function(x) all(floor(x) == x))]
+int_cols = colnames(dt[, ..cols_features])[as.matrix(int_numbers)[1,]]
+factor_cols = dt[, ..int_cols][, lapply(.SD, function(x) length(unique(x)))]
+factor_cols = as.matrix(factor_cols)[1, ]
+factor_cols = factor_cols[factor_cols <= 100]
+dt = dt[, (names(factor_cols)) := lapply(.SD, as.factor), .SD = names(factor_cols)]
+
+# change IDate to date, because of error
+# Assertion on 'feature types' failed: Must be a subset of
+# {'logical','integer','numeric','character','factor','ordered','POSIXct'},
+# but has additional elements {'IDate'}.
+dt[, date := as.POSIXct(date, tz = "UTC")]
+
+# Sort
+# this returns error on HPC. Some problem with memory
+setorder(dt, date)
+
 # Final checks
 dt[, max(date)]
 
-# Save features
-last_date = strftime(dt[, max(date)], "%Y%m%d")
-file_name = paste0("ml-ohlcv-", last_date, ".csv")
-file_name_local = fs::path(PATH, file_name)
-fwrite(dt, file_name_local)
-
-# Send data to padobran mannually
-
-
+# Save
+fwrite(dt, "/home/sn/data/strategies/ml_ohlcv/data.csv")
