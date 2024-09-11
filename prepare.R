@@ -1,8 +1,7 @@
 library(data.table)
 library(arrow)
-library(duckdb)
+library(dplyr)
 library(finfeatures)
-library(tiledb)
 
 
 # SET UP ------------------------------------------------------------------
@@ -11,32 +10,29 @@ symbols = c("tlt", "spy")
 
 # Globals
 PATH = "F:/strategies/mlohlcv"
-
-# Util# Initialize connection to DuckDB
-get_ohlcv_by_symbols = function(path, symbols) {
-  con = dbConnect(duckdb::duckdb())
-  symbols_string = paste(sprintf("'%s'", symbols), collapse=", ")
-  query = sprintf("
-  SELECT *
-  FROM '%s'
-  WHERE Symbol IN (%s)
-", path, symbols_string)
-  prices_dt = dbGetQuery(con, query)
-  dbDisconnect(con, shutdown = TRUE)
-  setDT(prices_dt)
-  return(prices_dt)
-}
-get_ohlcv_by_symbol = function(path, symbol) {
-  con = dbConnect(duckdb::duckdb())
-  query = sprintf("
-  SELECT *
-  FROM '%s'
-  WHERE Symbol = '%s'
-", path, symbol)
-  prices_dt = dbGetQuery(con, query)
-  dbDisconnect(con, shutdown = TRUE)
-  setDT(prices_dt)
-  return(prices_dt)
+# get_ohlcv_by_symbols = function(path, symbols) {
+#   con = dbConnect(duckdb::duckdb())
+#   symbols_string = paste(sprintf("'%s'", symbols), collapse=", ")
+#   query = sprintf("
+#   SELECT *
+#   FROM '%s'
+#   WHERE Symbol IN (%s)
+# ", path, symbols_string)
+#   prices_dt = dbGetQuery(con, query)
+#   dbDisconnect(con, shutdown = TRUE)
+#   setDT(prices_dt)
+#   return(prices_dt)
+# }
+get_ohlcv_by_symbols = function(tag, symbols) {
+  path_ = paste0("F:/data/equity/us/predictors_daily/", tag)
+  ds = open_dataset(path_, format = "parquet") %>%
+    filter(symbol %in% symbols) %>%
+    mutate(symbol = as.character(symbol)) %>%
+    collect()
+  setDT(ds)
+  setorder(ds, symbol, date)
+  setcolorder(ds, "symbol", before = 1)
+  return(ds)
 }
 
 
@@ -44,36 +40,24 @@ get_ohlcv_by_symbol = function(path, symbol) {
 # OHLCV Prices
 prices = get_ohlcv_by_symbols("F:/strategies/momentum/prices.csv", symbols)
 
+
+# f = list.files("F:/data/equity/us/predictors_daily/fracdiff")
+# ft = grepl("symbol=[a-z]", f)
+# fn = nchar(f)
+# all(fn > 7)
+# nchar
+# nchar("symbol=")
+# all(ft)
+
 # Predictors
 # https://github.com/duckdb/duckdb/issues/4295
-exuber = get_ohlcv_by_symbols("F:/data/equity/us/predictors_daily/exuber.parquet", symbols)
-system.time({
-  exuber = get_ohlcv_by_symbols("F:/data/equity/us/predictors_daily/exuber.parquet", symbols)
-})
-forecasts = get_ohlcv_by_symbols("F:/data/equity/us/predictors_daily/forecasts.parquet", symbols)
-fracdiff = get_ohlcv_by_symbols("F:/data/equity/us/predictors_daily/fracdiff.parquet", symbols)
-tsfeatures = get_ohlcv_by_symbols("F:/data/equity/us/predictors_daily/tsfeatures.parquet", symbols)
-
-arr = tiledb_array("F:/data/equity/us/predictors_daily/backcusum")
-arr = tiledb_array("F:/data/equity/us/predictors_daily/exuber")
-arr = tiledb_array("F:/data/equity/us/predictors_daily/forecasts")
-
-
-system.time({
-  exuber = get_ohlcv_by_symbols("F:/data/equity/us/predictors_daily/exuber.parquet", symbols)
-})
-# user  system elapsed
-# 47.93  935.37   49.25
-system.time({
-  arr = tiledb_array("F:/data/equity/us/predictors_daily/backcusum",
-                     return_as = "data.table",
-                     query_layout = "UNORDERED")
-  selected_ranges(arr) = list(symbol = cbind(symbols, symbols))
-  test = arr[]
-  tiledb_array_close(arr)
-})
-user  system elapsed
-6.69    6.90    2.27
+system.time({backcusum = get_ohlcv_by_symbols("backcusum", symbols)})
+system.time({exuber = get_ohlcv_by_symbols("exuber", symbols)})
+system.time({forecasts = get_ohlcv_by_symbols("forecasts", symbols)})
+system.time({fracdiff = get_ohlcv_by_symbols("fracdiff", symbols)})
+system.time({theftpy = get_ohlcv_by_symbols("theftpy", symbols)})
+system.time({theftr = get_ohlcv_by_symbols("theftr", symbols)})
+system.time({tsfeatures = get_ohlcv_by_symbols("tsfeatures", symbols)})
 
 # Generate other Ohlcv predictors
 ohlcv = Ohlcv$new(prices)

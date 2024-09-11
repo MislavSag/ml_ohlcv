@@ -354,7 +354,7 @@ as.data.table(graph_kknn$param_set)[, .(id, class, lower, upper, levels)]
 search_space_kknn = c(
   search_space_template,
   ps(
-    regr.kknn.k        = p_dbl(lower = 1, upper = 50, logscale = TRUE),
+    regr.kknn.k        = p_int(lower = 1, upper = 50, logscale = TRUE),
     regr.kknn.distance = p_dbl(lower = 1, upper = 5),
     regr.kknn.kernel   = p_fct(levels = c("rectangular","optimal", "epanechnikov",
                                           "biweight", "triweight", "cos", "inv",
@@ -483,7 +483,7 @@ as.data.table(graph_bart$param_set)[, .(id, class, lower, upper, levels)]
 search_space_bart = c(
   search_space_template,
   ps(
-    regr.bart.k      = p_int(lower = 1, upper = 10),
+    regr.bart.k      = p_dbl(lower = 1, upper = 10),
     regr.bart.numcut = p_int(lower = 10, upper = 200),
     regr.bart.ntree  = p_int(lower = 50, upper = 500)
   )
@@ -968,7 +968,7 @@ if (interactive()) {
   sh_file = sprintf("
 #!/bin/bash
 
-#PBS -N PEAD
+#PBS -N MLOHLCV
 #PBS -l ncpus=4
 #PBS -l mem=8GB
 #PBS -J 1-%d
@@ -978,7 +978,7 @@ if (interactive()) {
 cd ${PBS_O_WORKDIR}
 apptainer run image.sif padobran_run.R 0 %s
 ", nrow(designs), dirname_, dirname_)
-  sh_file_name = "run_month.sh"
+  sh_file_name = "padobran_run.sh"
   file.create(sh_file_name)
   writeLines(sh_file, sh_file_name)
 }
