@@ -3,4 +3,5 @@
 .RData
 .Ruserdata
 .Renviron
-experiments_test/
+experiments*
+gausscov*
