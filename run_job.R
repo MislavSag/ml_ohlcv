@@ -130,7 +130,7 @@ lgr::get_logger("mlr3")$set_threshold("debug")
 
 # load registry
 if (interactive()) {
-  reg = loadRegistry("experiments_pre_test")
+  reg = loadRegistry("experiments_test")
 } else {
   reg = loadRegistry(reg_name)
 }

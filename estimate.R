@@ -844,7 +844,7 @@ if (interactive()) {
   dirname_ = "experiments_test"
   if (dir.exists(dirname_)) system(paste0("rm -r ", dirname_))
 } else {
-  dirname_ = "experiments_test"
+  dirname_ = "experiments"
   if (dir.exists(dirname_)) system(paste0("rm -r ", dirname_))
 }
 
