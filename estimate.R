@@ -620,21 +620,33 @@ if (interactive()) {
 }
 
 
-# # STACKED -----------------------------------------------------------------
-# # as_task_regr(dt[, ..cols_], id = "mlohlcv", target = "target_ret_1")
-# # task$col_roles$feature = setdiff(task$col_roles$feature, id_cols)
-#
-#
-# # TASKS -------------------------------------------------------------------
-# # ID columns we always keep
-# id_cols = c("symbol", "date", "target_ret_1")
-#
-# # Create task
-# cols_ = c(id_cols, cols_features)
-# task = as_task_regr(dt[, ..cols_], id = "mlohlcv", target = "target_ret_1")
-#
-# # Set roles for id columns
-# task$col_roles$feature = setdiff(task$col_roles$feature, id_cols)
+# STACKED -----------------------------------------------------------------
+# Create tasks for every symbol
+str(dt)
+tasks = lapply(dt[, unique(symbol)], function(symbol_) {
+  print(symbol_)
+  task_ = as_task_regr(
+    dt[symbol == symbol_, .SD, .SDcols = c(cols_ids, cols_predictors)],
+    id = symbol_,
+    target = cols_target)
+  task_$col_roles$feature = setdiff(task_$col_roles$feature, cols_ids)
+  return(task_)
+})
+
+# Check
+tasks[[1]]$data(cols = c("symbol", "date"))
+tasks[[2]]$data(cols = c("symbol", "date"))
+
+
+# Create task for stack CV approach
+id_cols = c("symbol", "date", "target_ret_1")
+
+# Create task
+cols_ = c(id_cols, cols_features)
+task = as_task_regr(dt[, ..cols_], id = "mlohlcv", target = "target_ret_1")
+
+# Set roles for id columns
+task$col_roles$feature = setdiff(task$col_roles$feature, id_cols)
 
 
 # DESIGNS -----------------------------------------------------------------

@@ -2,20 +2,16 @@ library(data.table)
 library(mlr3batchmark)
 library(batchtools)
 library(fs)
-# library(data.table)
-# library(mlr3verse)
-# library(mlr3batchmark)
-# library(batchtools)
-# library(duckdb)
 library(PerformanceAnalytics)
 library(AzureStor)
-# library(future.apply)
-# library(lubridate)
 library(ggplot2)
 library(matrixStats)
 
+
 # set up
-PATH = "F:/strategies/mlohlcv/padobran"
+if (Sys.info()["user"] == "Mislav") {
+  PATH = "F:/strategies/mlohlcv/padobran"
+}
 
 # import results
 # reg = loadRegistry(PATH)
@@ -39,6 +35,10 @@ results_files = fs::path_ext_remove(fs::path_file(dir_ls(fs::path(PATH, "results
 ids_done = findDone(reg=reg)
 ids_done = ids_done[job.id %in% results_files]
 ids_notdone = findNotDone(reg=reg)
+
+# Reasons for not done:
+# 1. Catbootst could not be found
+# 2. Memory limit
 
 # get results
 tabs = batchtools::getJobTable(ids_done, reg = reg)[
@@ -114,7 +114,6 @@ dt[, `:=`(
   truth_sign = as.factor(sign(ifelse(truth == 0, 1, truth))),
   response_sign = as.factor(sign(response))
 )]
-
 dt[truth_sign == 0]
 
 # classification measures across ids
@@ -129,6 +128,7 @@ dt[, measures(truth_sign, response_sign), by = c("symbol")]
 dt[, measures(truth_sign, response_sign), by = c("learner")]
 dt[, measures(truth_sign, response_sign), by = c("cv", "symbol")]
 dt[, measures(truth_sign, response_sign), by = c("cv", "learner")]
+dt[, measures(truth_sign, response_sign), by = c("symbol", "learner")]
 # predictions[, measures(truth_sign, response_sign), by = c("cv", "task", "learner")][order(V1)]
 
 # prediction to wide format
@@ -165,23 +165,25 @@ calculate_measures = function(t, res) {
 dtw[, calculate_measures(truth_sign, as.factor(sign(mean_resp))), by = symbol]
 dtw[, calculate_measures(truth_sign, as.factor(sign(median_resp))), by = symbol]
 dtw[, calculate_measures(truth_sign, as.factor(sign(sum_resp))), by = symbol]
-dtw[, calculate_measures(truth_sign, factor(ifelse(sum_buy > 6, 1, -1), levels = c(-1, 1)))]
+dtw[, calculate_measures(truth_sign, factor(ifelse(sum_buy > 8, 1, -1), levels = c(-1, 1)))]
 
 # performance by returns
 cols = colnames(dtw)
-cols = cols[which(cols == "earth"):which(cols == "sum_resp")]
+cols = cols[which(cols == "bart"):which(cols == "sum_resp")]
 cols = c("symbol", cols)
 melt(na.omit(dtw[, ..cols]), id.vars = "symbol")[value > 0, sum(value),
                                                  by = .(symbol, variable)][order(V1)]
 melt(na.omit(dtw[, ..cols]), id.vars = "symbol")[value > 0 & value < 2, sum(value),
                                                  by = .(symbol, variable)][order(V1)]
 
-#  save to azure for QC backtest
+# Save to azure for QC backtest
 cont = storage_container(BLOBENDPOINT, "qc-backtest")
-file_name_ =  paste0("pead_qc.csv")
+file_name_ =  paste0("mlohlcv.csv")
 qc_data = na.omit(copy(dtw)[, rsm := NULL])
 qc_data = unique(qc_data, by = c("symbol", "date"))
+setorder(qc_data, date, symbol)
 qc_data[, .(min_date = min(date), max_date = max(date))]
+qc_data[symbol == "tlt"]
 storage_write_csv(qc_data, cont, file_name_)
 
 
