@@ -10,6 +10,7 @@ library(mlr3batchmark)
 # SETUP -------------------------------------------------------------------
 # Parameters
 ncpus = 4
+cv = "stack" # "stack" or "parallel"
 
 
 # DATA --------------------------------------------------------------------
@@ -41,6 +42,7 @@ mlr_pipeops$add("dropnacol", finautoml::PipeOpDropNACol)
 mlr_pipeops$add("dropcorr", finautoml::PipeOpDropCorr)
 # mlr_pipeops$add("pca_explained", PipeOpPCAExplained)
 mlr_pipeops$add("filter_target", finautoml::PipeOpFilterRegrTarget)
+mlr_pipeops$add("filter_rows", finautoml::PipeOpFilterRows)
 mlr_filters$add("gausscov_f1st", finautoml::FilterGausscovF1st)
 # mlr_filters$add("gausscov_f3st", FilterGausscovF3st)
 mlr_measures$add("linex", finautoml::Linex)
@@ -64,6 +66,14 @@ filter_target_gr = po("branch",
     po("filter_target", id = "filter_target_id")
   )) %>>%
   po("unbranch", id = "filter_target_unbranch")
+filter_rows_branch = po("branch",
+                         options = c("nop_filter_rows", "filter_rows"),
+                         id = "filter_rows_branch") %>>%
+  gunion(list(
+    po("nop", id = "nop_filter_rows"),
+    po("filter_rows", id = "filter_rows_id", phase = "train")
+  )) %>>%
+  po("unbranch", id = "filter_rows_unbranch")
 # create mlr3 graph that takes 3 filters and union predictors from them
 filters_ = list(
   po("filter", flt("disr"), filter.nfeat = 5),
@@ -76,7 +86,7 @@ filters_ = list(
   po("filter", flt("carscore"), filter.nfeat = 5), # UNCOMMENT LATER< SLOWER SO COMMENTED FOR DEVELOPING
   po("filter", flt("information_gain"), filter.nfeat = 5),
   po("filter", filter = flt("relief"), filter.nfeat = 5),
-  po("filter", filter = flt("gausscov_f1st"), p0 = 0.25, filter.cutoff = 0)
+  po("filter", filter = flt("gausscov_f3st"), p0 = 0.01, filter.cutoff = 0)
   # po("filter", mlr3filters::flt("importance", learner = mlr3::lrn("classif.rpart")), filter.nfeat = 10, id = "importance_1"),
   # po("filter", mlr3filters::flt("importance", learner = lrn), filter.nfeat = 10, id = "importance_2")
 )
@@ -84,15 +94,25 @@ graph_filters = gunion(filters_) %>>%
   po("featureunion", length(filters_), id = "feature_union_filters")
 
 graph_template =
+  filter_rows_branch %>>%
   filter_target_gr %>>%
+  # Hyperband tuning
   po("subsample") %>>% # uncomment this for hyperparameter tuning
+  # Simple preprocessing
   po("dropnacol", id = "dropnacol", cutoff = 0.05) %>>%
   po("dropna", id = "dropna") %>>%
   po("removeconstants", id = "removeconstants_1", ratio = 0)  %>>%
   po("fixfactors", id = "fixfactors") %>>%
-  po("winsorizesimple", id = "winsorizesimple", probs_low = 0.01, probs_high = 0.99, na_rm = TRUE) %>>%
+  # Winsorization
+  po("branch", options = c("winsoriaztion", "winsoriaztion_nop"), id = "winsorization_branch") %>>%
+  gunion(list(po("winsorizesimple", probs_low = 0.01, probs_high = 0.99, na_rm = TRUE),
+              po("nop")
+  )) %>>%
+  po("unbranch", id = "winsoriaztion_unbranch") %>>%
+  # po("winsorizesimple", id = "winsorizesimple", probs_low = 0.01, probs_high = 0.99, na_rm = TRUE) %>>%
   # po("winsorizesimplegroup", group_var = "weekid", id = "winsorizesimplegroup", probs_low = 0.01, probs_high = 0.99, na.rm = TRUE) %>>%
   po("removeconstants", id = "removeconstants_2", ratio = 0)  %>>%
+  # Drop correlated columns
   po("dropcorr", id = "dropcorr", cutoff = 0.99) %>>%
   # po("uniformization") %>>%
   # scale branch
@@ -123,6 +143,17 @@ graph_template =
   #   po("modelmatrix", formula = ~ . ^ 2))) %>>%
   # po("unbranch", id = "interaction_unbranch") %>>%
   po("removeconstants", id = "removeconstants_3", ratio = 0)
+plot(graph_template)
+
+# Inspect filtering columns
+# pattterns: back.*Two.*Rej,
+int_cols = dt[, vapply(.SD, function(x) uniqueN(x) < 4, FUN.VALUE = logical(1))]
+int_cols = names(int_cols[int_cols])
+cols = tasks[[1]]$feature_names[grepl("tsfreshValuesAggLinearTrend*", tasks[[1]]$feature_names)]
+x = tasks[[1]]$data(cols = c("symbol", "date", cols))
+x = na.omit(melt(x, id.vars = c("symbol", "date")))[
+  , nrow(.SD[value == 1]) / nrow(.SD), by = variable]
+x[V1 %between% c(0.05, 0.25)]
 
 # hyperparameters template
 as.data.table(graph_template$param_set)[1:100]
@@ -139,49 +170,70 @@ search_space_template = ps(
   # preprocessing
   dropcorr.cutoff = p_fct(c("0.80", "0.90", "0.95", "0.99"),
                           trafo = function(x, param_set) return(as.double(x))),
-  winsorizesimple.probs_high = p_fct(as.character(winsorize_sp),
-                                     trafo = function(x, param_set) return(as.double(x))),
-  winsorizesimple.probs_low = p_fct(as.character(1-winsorize_sp),
-                                    trafo = function(x, param_set) return(as.double(x))),
+  winsorization_branch.selection = p_fct(levels = c("winsoriaztion", "winsoriaztion_nop")),
+  winsorization.probs_high = p_fct(
+    as.character(winsorize_sp),
+    trafo = function(x, param_set) return(as.double(x)),
+    depends = winsorization_branch.selection == "winsoriaztion"),
+  winsorization.probs_low = p_fct(
+    as.character(1 - winsorize_sp),
+    trafo = function(x, param_set) return(as.double(x)),
+    depends = winsorization_branch.selection == "winsoriaztion"),
   # scaling
-  scale_branch.selection = p_fct(levels = c("uniformization", "scale"))
+  scale_branch.selection = p_fct(levels = c("uniformization", "scale")),
+  # Filter rows
+  filter_rows_branch.selection = p_fct(levels = c("nop_filter_rows", "filter_rows")),
+  filter_rows_id.filter_formula = p_fct(
+    levels = as.character(1:3),
+    depends = filter_rows_branch.selection == "filter_rows" &
+      filter_target_branch.selection == "nop_filter_target"),
+  .extra_trafo = function(x, param_set) {
+    if (x$filterrows.filter_formula == "1") {
+      x$filterrows.filter_formula = as.formula("~ backcusum66TwoSided2BackcusumRejections10 == 1")
+    } else if (x$filterrows.filter_formula == "2") {
+      x$filterrows.filter_formula = as.formula("~ backcusum66TwoSided2BackcusumRejections100 == 1")
+    } else if (x$filterrows.filter_formula == "3") {
+      x$filterrows.filter_formula = as.formula("~ backcusum66TwoSided2BackcusumRejections50 == 1")
+    }
+    return(x)
+  }
 )
 
-# if (interactive()) {
-#   # show all combinations from search space, like in grid
-#   sp_grid = generate_design_grid(search_space_template, 1)
-#   sp_grid = sp_grid$data
-#   sp_grid
-#
-#   # check ids of nth cv sets
-#   train_ids = custom_cvs[[1]]$inner$instance$train[[1]]
-#
-#   # help graph for testing preprocessing
-#   preprocess_test = function(
-    #     fb_ = c("nop_filter_target", "filter_target_select")
-#     ) {
-#     fb_ = match.arg(fb_) # fb_ = "nop_filter_target"
-#     task_ = tasks[[1]]$clone()
-#     nr = task_$nrow
-#     rows_ = (nr-10000):nr
-#     # task_$filter(rows_)
-#     task_$filter(train_ids)
-#     # dates = task_$backend$data(rows_, "date")
-#     # print(dates[, min(date)])
-#     # print(dates[, max(date)])
-#     gr_test = graph_template$clone()
-#     # gr_test$param_set$values$filter_target_branch.selection = fb_
-#     # gr_test$param_set$values$filter_target_id.q = 0.3
-#     # gr_test$param_set$values$subsample.frac = 0.6
-#     # gr_test$param_set$values$dropcorr.cutoff = 0.99
-#     # gr_test$param_set$values$scale_branch.selection = sc_
-#     return(gr_test$train(task_))
-#   }
-#
-#   # test graph preprocesing
-#   system.time({test_default = preprocess_test()})
-#   # test_2 = preprocess_test(fb_ = "filter_target_select")
-# }
+if (interactive()) {
+  # show all combinations from search space, like in grid
+  sp_grid = generate_design_grid(search_space_template, 1)
+  sp_grid = sp_grid$data
+  sp_grid
+
+  # check ids of nth cv sets
+  train_ids = custom_cvs[[1]]$inner$instance$train[[1]]
+
+  # help graph for testing preprocessing
+  preprocess_test = function(
+    fb_ = c("nop_filter_target", "filter_target_select")
+    ) {
+    fb_ = match.arg(fb_) # fb_ = "nop_filter_target"
+    task_ = tasks[[1]]$clone()
+    nr = task_$nrow
+    rows_ = (nr-10000):nr
+    # task_$filter(rows_)
+    task_$filter(train_ids)
+    # dates = task_$backend$data(rows_, "date")
+    # print(dates[, min(date)])
+    # print(dates[, max(date)])
+    gr_test = graph_template$clone()
+    gr_test$param_set$set_values(
+      filter_rows_id.filter_formula = as.formula("~ backcusum66TwoSided2BackcusumRejections50 == 1"),
+      filter_rows_branch.selection = "filter_rows",
+      winsorization_branch.selection = "winsoriaztion",
+      filter_target_branch.selection = "filter_target_select"
+    )
+    return(gr_test$train(task_))
+  }
+
+  # test graph preprocesing
+  system.time({test_default = preprocess_test()})
+}
 
 # random forest graph
 graph_rf = graph_template %>>%
@@ -443,26 +495,11 @@ set_threads(graph_gbm, n = ncpus)
 set_threads(graph_rsm, n = ncpus)
 set_threads(graph_catboost, n = ncpus)
 set_threads(graph_glmnet, n = ncpus)
-# set_threads(graph_cforest, n = threads)
+set_threads(graph_cforest, n = threads)
 
 
-# PARALLEL TASKS ----------------------------------------------------------
-# Create tasks for every symbol
-str(dt)
-tasks = lapply(dt[, unique(symbol)], function(symbol_) {
-  print(symbol_)
-  task_ = as_task_regr(
-    dt[symbol == symbol_, .SD, .SDcols = c(cols_ids, cols_predictors)],
-    id = symbol_,
-    target = cols_target)
-  task_$col_roles$feature = setdiff(task_$col_roles$feature, cols_ids)
-  return(task_)
-})
 
-# Check
-tasks[[1]]$data(cols = c("symbol", "date"))
-tasks[[2]]$data(cols = c("symbol", "date"))
-
+# CV ----------------------------------------------------------------------
 # Cross validation
 create_custom_rolling_windows = function(task,
                                          duration_unit = "week", # can be day, week, month
@@ -565,12 +602,41 @@ create_custom_rolling_windows = function(task,
   return(list(outer = custom_outer, inner = custom_inner))
 }
 
+# Parallel CV
+if (cv == "parallel") {
+  # Create tasks for every symbol
+  str(dt)
+  tasks = lapply(dt[, unique(symbol)], function(symbol_) {
+    print(symbol_)
+    task_ = as_task_regr(
+      dt[symbol == symbol_, .SD, .SDcols = c(cols_ids, cols_predictors)],
+      id = symbol_,
+      target = cols_target)
+    task_$col_roles$feature = setdiff(task_$col_roles$feature, cols_ids)
+    return(task_)
+  })
+
+  # Check
+  tasks[[1]]$data(cols = c("symbol", "date"))
+  tasks[[2]]$data(cols = c("symbol", "date"))
+} else if (cv == "stacked") {
+  # Create tasks for every symbol
+  tasks = as_task_regr(dt[, .SD, .SDcols = c(cols_ids, cols_predictors)],
+                       id = "stacked",
+                       target = cols_target)
+  tasks$col_roles$feature = setdiff(tasks$col_roles$feature, cols_ids)
+  tasks = list(tasks) # This is just to be a list as in parallel tasks
+
+  # Check
+  tasks$data(cols = c("symbol", "date"))
+}
+
 # Create CVS's for every task
 custom_cvs = lapply(tasks, function(task_) {
   create_custom_rolling_windows(
     task = task_$clone(),
     duration_unit = "week",
-    train_duration = 8*5*12,
+    train_duration = 52*10,
     gap_duration = 1,
     tune_duration = 5*3,
     test_duration = 1
@@ -620,35 +686,6 @@ if (interactive()) {
 }
 
 
-# STACKED -----------------------------------------------------------------
-# Create tasks for every symbol
-str(dt)
-tasks = lapply(dt[, unique(symbol)], function(symbol_) {
-  print(symbol_)
-  task_ = as_task_regr(
-    dt[symbol == symbol_, .SD, .SDcols = c(cols_ids, cols_predictors)],
-    id = symbol_,
-    target = cols_target)
-  task_$col_roles$feature = setdiff(task_$col_roles$feature, cols_ids)
-  return(task_)
-})
-
-# Check
-tasks[[1]]$data(cols = c("symbol", "date"))
-tasks[[2]]$data(cols = c("symbol", "date"))
-
-
-# Create task for stack CV approach
-id_cols = c("symbol", "date", "target_ret_1")
-
-# Create task
-cols_ = c(id_cols, cols_features)
-task = as_task_regr(dt[, ..cols_], id = "mlohlcv", target = "target_ret_1")
-
-# Set roles for id columns
-task$col_roles$feature = setdiff(task$col_roles$feature, id_cols)
-
-
 # DESIGNS -----------------------------------------------------------------
 # Create design that will be used for all learners
 designs_parallel_l = lapply(seq_along(custom_cvs), function(j) {
@@ -686,8 +723,18 @@ designs_parallel_l = lapply(seq_along(custom_cvs), function(j) {
                         list(cv_inner$test_set(i)))
 
     # objects for all autotuners
-    measure_ = msr("adjloss2")
-    tuner_   = tnr("hyperband", eta = 6)
+    measure_ = msr("linex")
+    tuner_   = tnr("hyperband", eta = 4)
+    # q: What does above eta parameter mean?
+    # a: The eta parameter is the reduction factor of the number of configurations
+    #     and is used to reduce the number of configurations in each iteration.
+    #     The number of configurations is reduced by a factor of eta in each iteration.
+    #     The default value is 3.
+    #     The number of configurations is reduced by a factor of eta in each iteration.
+    # q: If I want more detailed search, should I use smaller or larger eta?
+    # a: If you want more detailed search, you should use a smaller eta.
+    #     The smaller the eta, the more configurations are evaluated.
+
     # tuner_   = tnr("mbo")
     # term_evals = 20
 
@@ -843,7 +890,8 @@ designs_parallel_l = lapply(seq_along(custom_cvs), function(j) {
     design = benchmark_grid(
       tasks = tasks[[j]]$clone(),
       learners = list(at_rf, at_xgboost, at_lightgbm, at_nnet, at_earth,
-                      at_kknn, at_gbm, at_rsm, at_bart, at_catboost, at_glmnet), # , at_cforest
+                      at_kknn, at_gbm, at_rsm, at_bart, at_catboost, at_glmnet,
+                      at_cforest),
       resamplings = customo_
     )
   })
