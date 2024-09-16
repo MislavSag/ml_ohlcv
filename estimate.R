@@ -86,7 +86,7 @@ filters_ = list(
   po("filter", flt("carscore"), filter.nfeat = 5), # UNCOMMENT LATER< SLOWER SO COMMENTED FOR DEVELOPING
   po("filter", flt("information_gain"), filter.nfeat = 5),
   po("filter", filter = flt("relief"), filter.nfeat = 5),
-  po("filter", filter = flt("gausscov_f3st"), p0 = 0.01, filter.cutoff = 0)
+  po("filter", filter = flt("gausscov_f1st"), p0 = 0.00001, filter.cutoff = 0)
   # po("filter", mlr3filters::flt("importance", learner = mlr3::lrn("classif.rpart")), filter.nfeat = 10, id = "importance_1"),
   # po("filter", mlr3filters::flt("importance", learner = lrn), filter.nfeat = 10, id = "importance_2")
 )
@@ -147,13 +147,15 @@ plot(graph_template)
 
 # Inspect filtering columns
 # pattterns: back.*Two.*Rej,
-int_cols = dt[, vapply(.SD, function(x) uniqueN(x) < 4, FUN.VALUE = logical(1))]
-int_cols = names(int_cols[int_cols])
-cols = tasks[[1]]$feature_names[grepl("tsfreshValuesAggLinearTrend*", tasks[[1]]$feature_names)]
-x = tasks[[1]]$data(cols = c("symbol", "date", cols))
-x = na.omit(melt(x, id.vars = c("symbol", "date")))[
-  , nrow(.SD[value == 1]) / nrow(.SD), by = variable]
-x[V1 %between% c(0.05, 0.25)]
+if (interactive()) {
+  int_cols = dt[, vapply(.SD, function(x) uniqueN(x) < 4, FUN.VALUE = logical(1))]
+  int_cols = names(int_cols[int_cols])
+  cols = colnames(dt)[grepl("tsfreshValuesAggLinearTrend*", colnames(dt))]
+  x = dt[, .SD, .SDcols = c("symbol", "date", cols)]
+  x = na.omit(melt(x, id.vars = c("symbol", "date")))[
+    , nrow(.SD[value == 1]) / nrow(.SD), by = variable]
+  x[V1 %between% c(0.05, 0.25)]
+}
 
 # hyperparameters template
 as.data.table(graph_template$param_set)[1:100]
@@ -185,15 +187,14 @@ search_space_template = ps(
   filter_rows_branch.selection = p_fct(levels = c("nop_filter_rows", "filter_rows")),
   filter_rows_id.filter_formula = p_fct(
     levels = as.character(1:3),
-    depends = filter_rows_branch.selection == "filter_rows" &
-      filter_target_branch.selection == "nop_filter_target"),
+    depends = filter_rows_branch.selection == "filter_rows"),
   .extra_trafo = function(x, param_set) {
-    if (x$filterrows.filter_formula == "1") {
-      x$filterrows.filter_formula = as.formula("~ backcusum66TwoSided2BackcusumRejections10 == 1")
-    } else if (x$filterrows.filter_formula == "2") {
-      x$filterrows.filter_formula = as.formula("~ backcusum66TwoSided2BackcusumRejections100 == 1")
-    } else if (x$filterrows.filter_formula == "3") {
-      x$filterrows.filter_formula = as.formula("~ backcusum66TwoSided2BackcusumRejections50 == 1")
+    if (x$filter_rows_id.filter_formula == "1") {
+      x$filter_rows_id.filter_formula = as.formula("~ backcusum66TwoSided2BackcusumRejections10 == 1")
+    } else if (x$filter_rows_id.filter_formula == "2") {
+      x$filter_rows_id.filter_formula = as.formula("~ backcusum66TwoSided2BackcusumRejections100 == 1")
+    } else if (x$filter_rows_id.filter_formula == "3") {
+      x$filter_rows_id.filter_formula = as.formula("~ backcusum66TwoSided2BackcusumRejections50 == 1")
     }
     return(x)
   }
@@ -209,10 +210,7 @@ if (interactive()) {
   train_ids = custom_cvs[[1]]$inner$instance$train[[1]]
 
   # help graph for testing preprocessing
-  preprocess_test = function(
-    fb_ = c("nop_filter_target", "filter_target_select")
-    ) {
-    fb_ = match.arg(fb_) # fb_ = "nop_filter_target"
+  preprocess_test = function() {
     task_ = tasks[[1]]$clone()
     nr = task_$nrow
     rows_ = (nr-10000):nr
@@ -222,17 +220,24 @@ if (interactive()) {
     # print(dates[, min(date)])
     # print(dates[, max(date)])
     gr_test = graph_template$clone()
+    # gr_test$param_set$set_values(
+    #   filter_rows_id.filter_formula = as.formula("~ backcusum66TwoSided2BackcusumRejections50 == 1"),
+    #   filter_rows_branch.selection = "filter_rows",
+    #   winsorization_branch.selection = "winsoriaztion",
+    #   filter_target_branch.selection = "filter_target_select"
+    # )
     gr_test$param_set$set_values(
-      filter_rows_id.filter_formula = as.formula("~ backcusum66TwoSided2BackcusumRejections50 == 1"),
-      filter_rows_branch.selection = "filter_rows",
+      filter_rows_branch.selection = "nop_filter_rows",
       winsorization_branch.selection = "winsoriaztion",
-      filter_target_branch.selection = "filter_target_select"
+      filter_target_branch.selection = "nop_filter_target"
     )
     return(gr_test$train(task_))
   }
 
   # test graph preprocesing
   system.time({test_default = preprocess_test()})
+
+  # TEst gausscov
 }
 
 # random forest graph
@@ -495,8 +500,7 @@ set_threads(graph_gbm, n = ncpus)
 set_threads(graph_rsm, n = ncpus)
 set_threads(graph_catboost, n = ncpus)
 set_threads(graph_glmnet, n = ncpus)
-set_threads(graph_cforest, n = threads)
-
+set_threads(graph_cforest, n = ncpus)
 
 
 # CV ----------------------------------------------------------------------
@@ -619,7 +623,7 @@ if (cv == "parallel") {
   # Check
   tasks[[1]]$data(cols = c("symbol", "date"))
   tasks[[2]]$data(cols = c("symbol", "date"))
-} else if (cv == "stacked") {
+} else if (cv == "stack") {
   # Create tasks for every symbol
   tasks = as_task_regr(dt[, .SD, .SDcols = c(cols_ids, cols_predictors)],
                        id = "stacked",
@@ -628,7 +632,7 @@ if (cv == "parallel") {
   tasks = list(tasks) # This is just to be a list as in parallel tasks
 
   # Check
-  tasks$data(cols = c("symbol", "date"))
+  tasks[[1]]$data(cols = c("symbol", "date"))
 }
 
 # Create CVS's for every task
