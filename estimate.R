@@ -199,6 +199,7 @@ if (interactive()) {
 }
 
 # hyperparameters template
+print("hyperparameters")
 as.data.table(graph_template$param_set)[1:100]
 gausscov_sp = as.character(seq(0.2, 0.8, by = 0.1))
 winsorize_sp =  c(0.999, 0.99, 0.98, 0.97, 0.90, 0.8)
@@ -287,6 +288,7 @@ search_space_rf = c(
 )
 
 # xgboost graph
+print("xgboost")
 graph_xgboost = graph_template %>>%
   po("learner", learner = lrn("regr.xgboost"))
 plot(graph_xgboost)
@@ -304,6 +306,7 @@ search_space_xgboost = c(
 )
 
 # gbm graph
+print("GBM")
 graph_gbm = graph_template %>>%
   po("learner", learner = lrn("regr.gbm"))
 plot(graph_gbm)
