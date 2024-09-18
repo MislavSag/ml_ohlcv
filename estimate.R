@@ -323,6 +323,7 @@ search_space_gbm = c(
 )
 
 # catboost graph
+print("catboost")
 graph_catboost = graph_template %>>%
   po("learner", learner = lrn("regr.catboost"))
 graph_catboost = as_learner(graph_catboost)
@@ -339,6 +340,7 @@ search_space_catboost = c(
 )
 
 # cforest graph
+print("cforest")
 graph_cforest = graph_template %>>%
   po("learner", learner = lrn("regr.cforest"))
 graph_cforest = as_learner(graph_cforest)
@@ -370,6 +372,7 @@ search_space_cforest = c(
 # )
 
 # kknn graph
+print("kknn")
 graph_kknn = graph_template %>>%
   po("learner", learner = lrn("regr.kknn"))
 graph_kknn = as_learner(graph_kknn)
@@ -386,6 +389,7 @@ search_space_kknn = c(
 )
 
 # nnet graph
+print("nnet")
 graph_nnet = graph_template %>>%
   po("learner", learner = lrn("regr.nnet", MaxNWts = 50000))
 graph_nnet = as_learner(graph_nnet)
@@ -400,6 +404,7 @@ search_space_nnet = c(
 )
 
 # glmnet graph
+print("glmnet")
 graph_glmnet = graph_template %>>%
   po("learner", learner = lrn("regr.glmnet"))
 graph_glmnet = as_learner(graph_glmnet)
