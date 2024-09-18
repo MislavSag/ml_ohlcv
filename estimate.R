@@ -5,6 +5,7 @@ library(finautoml)
 library(paradox)
 library(batchtools)
 library(mlr3batchmark)
+# remotes::install_github("MislavSag/finautoml")
 
 
 # SETUP -------------------------------------------------------------------
@@ -31,6 +32,35 @@ cols_predictors = setdiff(colnames(dt), c(cols_ids, cols_remove))
 cols = dt[ , colnames(.SD), .SDcols = bit64::is.integer64]
 dt[ , (cols) := lapply(.SD, as.numeric), .SDcols = cols]
 
+# Tasks
+if (cv == "parallel") {
+  # Create tasks for every symbol
+  str(dt)
+  tasks = lapply(dt[, unique(symbol)], function(symbol_) {
+    print(symbol_)
+    task_ = as_task_regr(
+      dt[symbol == symbol_, .SD, .SDcols = c(cols_ids, cols_predictors)],
+      id = symbol_,
+      target = cols_target)
+    task_$col_roles$feature = setdiff(task_$col_roles$feature, cols_ids)
+    return(task_)
+  })
+
+  # Check
+  tasks[[1]]$data(cols = c("symbol", "date"))
+  tasks[[2]]$data(cols = c("symbol", "date"))
+} else if (cv == "stack") {
+  # Create tasks for every symbol
+  tasks = as_task_regr(dt[, .SD, .SDcols = c(cols_ids, cols_predictors)],
+                       id = "stacked",
+                       target = cols_target)
+  tasks$col_roles$feature = setdiff(tasks$col_roles$feature, cols_ids)
+  tasks = list(tasks) # This is just to be a list as in parallel tasks
+
+  # Check
+  tasks[[1]]$data(cols = c("symbol", "date"))
+}
+
 
 # ADD PIPELINES -----------------------------------------------------------
 mlr_pipeops$add("uniformization", finautoml::PipeOpUniform)
@@ -44,7 +74,7 @@ mlr_pipeops$add("dropcorr", finautoml::PipeOpDropCorr)
 mlr_pipeops$add("filter_target", finautoml::PipeOpFilterRegrTarget)
 mlr_pipeops$add("filter_rows", finautoml::PipeOpFilterRows)
 mlr_filters$add("gausscov_f1st", finautoml::FilterGausscovF1st)
-# mlr_filters$add("gausscov_f3st", FilterGausscovF3st)
+mlr_filters$add("gausscov_f3st", finautoml::FilterGausscovF3st)
 mlr_measures$add("linex", finautoml::Linex)
 mlr_measures$add("adjloss2", finautoml::AdjLoss2)
 # mlr_measures$add("portfolio_ret", PortfolioRet)
@@ -83,13 +113,18 @@ filters_ = list(
   po("filter", flt("mrmr"), filter.nfeat = 5),
   po("filter", flt("njmim"), filter.nfeat = 5),
   po("filter", flt("cmim"), filter.nfeat = 5),
-  po("filter", flt("carscore"), filter.nfeat = 5), # UNCOMMENT LATER< SLOWER SO COMMENTED FOR DEVELOPING
-  po("filter", flt("information_gain"), filter.nfeat = 5),
-  po("filter", filter = flt("relief"), filter.nfeat = 5),
-  po("filter", filter = flt("gausscov_f1st"), p0 = 0.00001, filter.cutoff = 0)
+  # po("filter", flt("carscore"), filter.nfeat = 5), # UNCOMMENT LATER< SLOWER SO COMMENTED FOR DEVELOPING
+  po("filter", flt("information_gain"), filter.nfeat = 5)
+  # po("filter", filter = flt("relief"), filter.nfeat = 5),
+  # po("filter", filter = flt("gausscov_f1st"), p0 = 0.01, step = 0.01, save = FALSE, filter.cutoff = 0)
   # po("filter", mlr3filters::flt("importance", learner = mlr3::lrn("classif.rpart")), filter.nfeat = 10, id = "importance_1"),
   # po("filter", mlr3filters::flt("importance", learner = lrn), filter.nfeat = 10, id = "importance_2")
 )
+if (!interactive()) {
+  filters_ = c(filters_,
+               po("filter", flt("carscore"), filter.nfeat = 5),
+               po("filter", filter = flt("relief"), filter.nfeat = 5))
+}
 graph_filters = gunion(filters_) %>>%
   po("featureunion", length(filters_), id = "feature_union_filters")
 
@@ -200,44 +235,33 @@ search_space_template = ps(
   }
 )
 
+# Test preprocessing
 if (interactive()) {
   # show all combinations from search space, like in grid
   sp_grid = generate_design_grid(search_space_template, 1)
   sp_grid = sp_grid$data
   sp_grid
 
-  # check ids of nth cv sets
-  train_ids = custom_cvs[[1]]$inner$instance$train[[1]]
-
   # help graph for testing preprocessing
-  preprocess_test = function() {
-    task_ = tasks[[1]]$clone()
-    nr = task_$nrow
-    rows_ = (nr-10000):nr
-    # task_$filter(rows_)
-    task_$filter(train_ids)
-    # dates = task_$backend$data(rows_, "date")
-    # print(dates[, min(date)])
-    # print(dates[, max(date)])
-    gr_test = graph_template$clone()
-    # gr_test$param_set$set_values(
-    #   filter_rows_id.filter_formula = as.formula("~ backcusum66TwoSided2BackcusumRejections50 == 1"),
-    #   filter_rows_branch.selection = "filter_rows",
-    #   winsorization_branch.selection = "winsoriaztion",
-    #   filter_target_branch.selection = "filter_target_select"
-    # )
-    gr_test$param_set$set_values(
-      filter_rows_branch.selection = "nop_filter_rows",
-      winsorization_branch.selection = "winsoriaztion",
-      filter_target_branch.selection = "nop_filter_target"
-    )
-    return(gr_test$train(task_))
-  }
-
-  # test graph preprocesing
-  system.time({test_default = preprocess_test()})
-
-  # TEst gausscov
+  task_ = tasks[[1]]$clone()
+  nr = task_$nrow
+  rows_ = (nr-10000):nr
+  task_$filter(rows_)
+  task_$nrow
+  task_$ncol
+  gr_test = graph_template$clone()
+  # gr_test$param_set$set_values(
+  #   filter_rows_id.filter_formula = as.formula("~ backcusum66TwoSided2BackcusumRejections50 == 1"),
+  #   filter_rows_branch.selection = "filter_rows",
+  #   winsorization_branch.selection = "winsoriaztion",
+  #   filter_target_branch.selection = "filter_target_select"
+  # )
+  gr_test$param_set$set_values(
+    filter_rows_branch.selection = "nop_filter_rows",
+    winsorization_branch.selection = "winsoriaztion",
+    filter_target_branch.selection = "nop_filter_target"
+  )
+  system.time({test_default = gr_test$train(task_)})
 }
 
 # random forest graph
@@ -604,35 +628,6 @@ create_custom_rolling_windows = function(task,
   custom_outer$instantiate(task, inner_sets, test_sets)
 
   return(list(outer = custom_outer, inner = custom_inner))
-}
-
-# Parallel CV
-if (cv == "parallel") {
-  # Create tasks for every symbol
-  str(dt)
-  tasks = lapply(dt[, unique(symbol)], function(symbol_) {
-    print(symbol_)
-    task_ = as_task_regr(
-      dt[symbol == symbol_, .SD, .SDcols = c(cols_ids, cols_predictors)],
-      id = symbol_,
-      target = cols_target)
-    task_$col_roles$feature = setdiff(task_$col_roles$feature, cols_ids)
-    return(task_)
-  })
-
-  # Check
-  tasks[[1]]$data(cols = c("symbol", "date"))
-  tasks[[2]]$data(cols = c("symbol", "date"))
-} else if (cv == "stack") {
-  # Create tasks for every symbol
-  tasks = as_task_regr(dt[, .SD, .SDcols = c(cols_ids, cols_predictors)],
-                       id = "stacked",
-                       target = cols_target)
-  tasks$col_roles$feature = setdiff(tasks$col_roles$feature, cols_ids)
-  tasks = list(tasks) # This is just to be a list as in parallel tasks
-
-  # Check
-  tasks[[1]]$data(cols = c("symbol", "date"))
 }
 
 # Create CVS's for every task

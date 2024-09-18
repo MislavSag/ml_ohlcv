@@ -31,6 +31,9 @@ dt = read_parquet(f)
 # TODO: Remove some new data we dont have predictors for
 dt = dt[date < as.Date("2024-07-01")]
 
+# Inspect
+dim(dt)
+
 
 # LABELING ----------------------------------------------------------------
 # Target variables
