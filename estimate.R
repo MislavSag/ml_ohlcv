@@ -15,6 +15,8 @@ cv = "stack" # "stack" or "parallel"
 
 
 # DATA --------------------------------------------------------------------
+print("data")
+
 # Read data
 if (interactive()) {
   dt = fread("/home/sn/data/strategies/ml_ohlcv/data.csv")
@@ -63,6 +65,8 @@ if (cv == "parallel") {
 
 
 # ADD PIPELINES -----------------------------------------------------------
+print("pipelines")
+
 mlr_pipeops$add("uniformization", finautoml::PipeOpUniform)
 # mlr_pipeops$add("winsorize", PipeOpWinsorize)
 mlr_pipeops$add("winsorizesimple", finautoml::PipeOpWinsorizeSimple)
@@ -81,6 +85,8 @@ mlr_measures$add("adjloss2", finautoml::AdjLoss2)
 
 
 # LEARNERS ----------------------------------------------------------------
+print("learners")
+
 # graph templates
 gr = gunion(list(
   po("nop", id = "nop_union_pca"),
