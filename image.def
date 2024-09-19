@@ -39,7 +39,7 @@ From: r-base:4.3.0
   # Packages for filters
   R --slave -e 'install.packages("gausscov")'
   # Packages for models
-  R --slave -e 'remotes::install_github("mlr-org/mlr3extralearners")'
+  R --slave -e 'remotes::install_github("mlr-org/mlr3extralearners@*release")'
   R --slave -e 'remotes::install_github("MislavSag/finautoml")'
   R --slave -e 'install.packages("FSelectorRcpp")'
   R --slave -e 'install.packages("igraph")'
