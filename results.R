@@ -9,8 +9,9 @@ library(matrixStats)
 
 
 # set up
+list.files("F:/strategies/mlohlcv")
 if (Sys.info()["user"] == "Mislav") {
-  PATH = "F:/strategies/mlohlcv/padobran"
+  PATH = "F:/strategies/mlohlcv/padobran_stack"
 }
 
 # import results
