@@ -231,6 +231,9 @@ search_space_template = ps(
     levels = as.character(1:3),
     depends = filter_rows_branch.selection == "filter_rows"),
   .extra_trafo = function(x, param_set) {
+    if (is.null(x$filter_rows_id.filter_formula)) {
+      return(x)
+    }
     if (x$filter_rows_id.filter_formula == "1") {
       x$filter_rows_id.filter_formula = as.formula("~ backcusum66TwoSided2BackcusumRejections10 == 1")
     } else if (x$filter_rows_id.filter_formula == "2") {
@@ -737,7 +740,7 @@ designs_parallel_l = lapply(seq_along(custom_cvs), function(j) {
 
     # objects for all autotuners
     measure_ = msr("linex")
-    tuner_   = tnr("hyperband", eta = 4)
+    tuner_   = tnr("hyperband", eta = 2)
     # q: What does above eta parameter mean?
     # a: The eta parameter is the reduction factor of the number of configurations
     #     and is used to reduce the number of configurations in each iteration.
